@@ -1,9 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+﻿using ChatCommon;
+using Google.Protobuf;
 using System.Net.Sockets;
 using System.Text;
-using System.Threading.Tasks;
+using System.Security.Cryptography;
 
 namespace ChatClient
 {
@@ -11,6 +10,7 @@ namespace ChatClient
     {
         public string HOST;
         public int PORT;
+        public bool Running = true;
 
         public Client()
         {
@@ -25,18 +25,48 @@ namespace ChatClient
 
             thread.Start(client);
 
-            string s;
-            while(!string.IsNullOrEmpty(s = Console.ReadLine()))
+            RSACryptoServiceProvider rsaCryptoProvider = new RSACryptoServiceProvider(2048);
+            byte[] privateKey = rsaCryptoProvider.ExportRSAPrivateKey();
+            byte[] publicKey = rsaCryptoProvider.ExportRSAPublicKey();
+
+            //string s;
+            //while(!string.IsNullOrEmpty(s = Console.ReadLine()) && Running)
+            //{
+            //    byte[] buffer = Encoding.ASCII.GetBytes(s);
+            //    stream.Write(buffer, 0, buffer.Length);
+            //}
+
+            // Create the handshake request packet
+            HandshakeRequest handshakeRequest = new HandshakeRequest
             {
-                byte[] buffer = Encoding.ASCII.GetBytes(s);
-                stream.Write(buffer, 0, buffer.Length);
-            }
+                EncryptionPreference = EncryptionPreference.Strict,
+                ProtocolVersion = ProtocolVersion.Version1,
+                PublicKey = ByteString.CopyFrom(publicKey),
+            };
+            // get bytes from packet
+            byte[] data = handshakeRequest.ToByteArray();
+            // sign the data
+            byte[] signature = rsaCryptoProvider.SignData(data, SHA512.Create());
+            // create the final packet
+            Packet packet = new Packet
+            {
+                Op = Packet.Types.OPCode.HandshakeRequest,
+                Data = ByteString.CopyFrom(data),
+                Signature = ByteString.CopyFrom(signature)
+            };
+            // get bytes from packet
+            byte[] packetData = packet.ToByteArray();
+            // write the packet
+            stream.Write(packetData, 0, packetData.Length);
+            Console.WriteLine($"Sent {packetData.Length} bytes");
+            
 
             client.Client.Shutdown(SocketShutdown.Send);
             thread.Join();
             stream.Close();
             client.Close();
             Console.WriteLine("Disconnected");
+            Console.ReadLine();
 
             //byte[] bytes = Encoding.ASCII.GetBytes(data);
             //stream.Write(bytes, 0, bytes.Length);

@@ -1,0 +1,41 @@
+﻿syntax = "proto2";
+option csharp_namespace = "ChatCommon";
+
+enum ProtocolVersion {
+	VERSION_1 = 1;
+}
+
+enum EncryptionPreference {
+	// do not use encryption
+	NONE = 0;
+	// must use encryption
+	STRICT = 1;
+	// if supported
+	OPTIONAL = 2;
+}
+
+message HandshakeRequest {
+	required ProtocolVersion protocol_version = 1;
+	required bytes public_key = 2;
+	required EncryptionPreference encryption_preference = 3;
+}
+
+message HandshakeResponse {
+	required ProtocolVersion protocol_version = 1;
+	required string session_id = 2;
+	required bytes hmac_key = 3;
+	required bytes public_key = 4;
+	required bool auth_required = 5;
+	required EncryptionPreference encryption_preference = 6;
+}
+
+message Packet {
+	enum OPCode {
+		HANDSHAKE_REQUEST = 0;
+		HANDSHAKE_RESPONSE = 1;
+	}
+
+	required OPCode op = 1;
+	required bytes signature = 2;
+	optional bytes data = 3;
+}

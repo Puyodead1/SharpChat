@@ -1,0 +1,1 @@
+protoc -I=ChatCommon --csharp_out=ChatCommon ChatCommon\Protocol.proto

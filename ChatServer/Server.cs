@@ -1,10 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net;
+﻿using System.Net;
 using System.Net.Sockets;
-using System.Text;
-using System.Threading.Tasks;
+using System.Security.Cryptography;
+using ChatCommon;
 
 namespace ChatServer
 {
@@ -15,7 +12,7 @@ namespace ChatServer
         private bool Running = true;
         public TcpListener Listener;
         static readonly object _lock = new object();
-        static readonly Dictionary<int, TcpClient> Clients = new Dictionary<int, TcpClient>();
+        static readonly Dictionary<int, ClientConnection> ClientConnections = new Dictionary<int, ClientConnection>();
 
         public Server()
         {
@@ -26,35 +23,30 @@ namespace ChatServer
 
             Listener = new TcpListener(HOST, PORT);
             Listener.Start();
+            Console.WriteLine($"Server listening on port {PORT}");
 
             while(Running)
             {
                 TcpClient client = Listener.AcceptTcpClient();
-                int index = Clients.Count + 1;
-                lock (_lock) Clients.Add(index, client);
-                Console.WriteLine("Connection");
+                ClientConnection connection = new ClientConnection(client);
+                int index = ClientConnections.Count + 1;
+                lock (_lock) ClientConnections.Add(index, connection);
+                Console.WriteLine($"Client connected: {((IPEndPoint)client.Client.RemoteEndPoint).Address}");
 
                 ThreadPool.QueueUserWorkItem(HandleClient, index);
             }
 
-            //NetworkStream stream = client.GetStream();
-            //byte[] buffer = new byte[client.ReceiveBufferSize];
-
-            //int bytesRead = stream.Read(buffer, 0, buffer.Length);
-            //string data = Encoding.ASCII.GetString(buffer, 0, bytesRead);
-            //Console.WriteLine(data);
-
-            //stream.Write(buffer, 0, bytesRead);
-            //client.Close();
-            //listener.Stop();
+            Listener.Stop();
         }
 
         public void HandleClient(object obj)
         {
             int index = (int)obj;
+            ClientConnection clientConnection;
             TcpClient client;
 
-            lock (_lock) client = Clients[index];
+            lock (_lock) clientConnection = ClientConnections[index];
+            client = clientConnection.Client;
 
             while (true)
             {
@@ -67,13 +59,44 @@ namespace ChatServer
                     break;
                 }
 
-                string data = Encoding.ASCII.GetString(buffer, 0, size);
-                Console.WriteLine(data);
+                try
+                {
+                    Console.WriteLine($"Recieved {size} bytes");
+                    Packet packet = Packet.Parser.ParseFrom(buffer, 0, size);
+                    switch(packet.Op)
+                    {
+                        case Packet.Types.OPCode.HandshakeRequest:
+                            HandleHandshakeRequest(clientConnection, client, packet);
+                            break;
+                        default:
+                            Console.WriteLine($"Unknown OpCode {packet.Op}");
+                            break;
+                    }
+                } catch(Exception ex)
+                {
+                    Console.WriteLine($"Failed to parse packet: {ex}");
+                }
             }
 
-            lock (_lock) Clients.Remove(index);
+            Console.WriteLine($"Client disconnected: {((IPEndPoint)client.Client.RemoteEndPoint).Address}");
+
+            lock (_lock) ClientConnections.Remove(index);
             client.Client.Shutdown(SocketShutdown.Both);
             client.Close();
+        }
+
+        public void HandleHandshakeRequest(ClientConnection clientConnection, TcpClient client, Packet packet)
+        {
+            // get the handshake request packet
+            HandshakeRequest handshakeRequest = HandshakeRequest.Parser.ParseFrom(packet.Data);
+
+            // create a new RSA crypto service
+            RSACryptoServiceProvider rsaCryptoService = new RSACryptoServiceProvider();
+            // import rsa public key
+            rsaCryptoService.ImportRSAPublicKey(handshakeRequest.PublicKey.ToByteArray(), out _);
+            // verify the data with the signature
+            bool verified = rsaCryptoService.VerifyData(packet.Data.ToByteArray(), SHA512.Create(), packet.Signature.ToByteArray());
+            Console.WriteLine($"Data Verified?: {verified}");
         }
     }
 }
